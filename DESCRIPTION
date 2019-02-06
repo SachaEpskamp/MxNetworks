@@ -1,0 +1,9 @@
+Package: MxNetworks
+Type: Package
+Title: Fit GGM models and Vector Autoregression Models Using OpenMx
+Version: 0.1
+Author: Sacha Epskamp
+Maintainer: Sacha Epskamp <mail@sachaepskamp.com>
+Description: ...
+License: GPL-2
+Imports: qgraph (>= 1.6), dplyr
