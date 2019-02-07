@@ -3,11 +3,16 @@ panelVAR <- function(
   data, # Data
   designMatrix, # this matrix takes the following form: rows stand for variables, columns for lags. Use NA if a var is missing ina  lag and rownames to indicate the variable labels
   groupVar, # Grouping variable, if missing it is added
+  # fixedSaturated = FALSE, # Just sets saturated model means and covs to fixed from sample covs (pairwise deletion). Not optimal... But fast!
   stepup = FALSE, # Should step-up model selection be used?
+  jointStructure = FALSE, # Should the same structure (but not nessisarily parameters) be estimated?
+  groupEqual = "none", # options: "networks", "means", "all", "temporal", "contemporaneous", "between-subjects"
   MIcrit = 10, # Mod index criterion
   temporalModel = c("default","full","empty","manual"), # Models to use: default will pick, full = saturated, empty = empty, manual to take input form args below
   contemporaneousModel = c("default","full","empty","manual"),
+  contemporaneousPartial = TRUE, # Default to estimating GGM instead of cov matrix?
   betweenSubjectsModel = c("default","full","empty","manual"),
+  betweenSubjectsPartial = TRUE, # Default to estimating GGM instead of cov matrix?
   kappa_mu,
   sigma_mu,
   kappa_zeta,
@@ -17,15 +22,31 @@ panelVAR <- function(
   modIndices = stepup, # Set to FALSE if stepup = FALSE
   startValues = list(),
   name = "PanelVAR",
-  searchMatrices = c("Beta","Kappa_mu","Kappa_zeta")
+  searchMatrices = c("Beta","Kappa_mu","Kappa_zeta"),
+  alpha = 0.01, # alpha used for modification
+  verbose = TRUE,
+  optimizeBIC = TRUE, # If TRUE, stepup search stops when BIC is not improved
+  # saturatedModel,
+  baselineModel,
+  missing = "fiml"
 ){
-  if (stepUp & !modIndices){
+  if (stepup & !modIndices){
     modIndices <- TRUE
   }
   
   ### Check input ###
   if (is.matrix(data)){
     data <- as.data.frame(data)
+  }
+  
+  if (!all(groupEqual %in% c("none","networks", "means", "all", "temporal", "contemporaneous", "between-subjects"))){
+    stop("'groupEqual' must be one or more of the following: 'none', 'all', 'networks', 'means', 'contemporaneous', 'temporal', 'between-subjects'")
+  } 
+  if (any(groupEqual == "all")){
+    groupEqual <- c("means","temporal","contemporaneous","between-subjects")
+  }
+  if (any(groupEqual == "networks")){
+    groupEqual <- c(groupEqual[groupEqual!="networks"],"temporal","contemporaneous","between-subjects")
   }
   
   # models:
@@ -81,16 +102,32 @@ panelVAR <- function(
     beta <- array(NA, c(nNode, nNode,nGroup))
   }
   
-  if (contemporaneousModel == "empty"){
-    kappa_zeta <- array(diag(NA, nNode),c(nNode,nNode,nGroup))
-  } else if (contemporaneousModel == "full"){
-    kappa_zeta <- array(NA,c(nNode,nNode,nGroup))
+  if (contemporaneousPartial){
+    if (contemporaneousModel == "empty"){
+      kappa_zeta <- array(diag(NA, nNode),c(nNode,nNode,nGroup))
+    } else if (contemporaneousModel == "full"){
+      kappa_zeta <- array(NA,c(nNode,nNode,nGroup))
+    }
+  } else {
+    if (contemporaneousModel == "empty"){
+      sigma_zeta <- array(diag(NA, nNode),c(nNode,nNode,nGroup))
+    } else if (contemporaneousModel == "full"){
+      sigma_zeta <- array(NA,c(nNode,nNode,nGroup))
+    }
   }
   
-  if (betweenSubjectsModel == "empty"){
-    kappa_mu <- array(diag(NA, nNode),c(nNode,nNode,nGroup))
-  } else if (betweenSubjectsModel == "full"){
-    kappa_mu <- array(NA, c(nNode,nNode,nGroup))
+  if (betweenSubjectsPartial){
+    if (betweenSubjectsModel == "empty"){
+      kappa_mu <- array(diag(NA, nNode),c(nNode,nNode,nGroup))
+    } else if (betweenSubjectsModel == "full"){
+      kappa_mu <- array(NA, c(nNode,nNode,nGroup))
+    }
+  } else {
+    if (betweenSubjectsModel == "empty"){
+      sigma_mu <- array(diag(NA, nNode),c(nNode,nNode,nGroup))
+    } else if (betweenSubjectsModel == "full"){
+      sigma_mu <- array(NA, c(nNode,nNode,nGroup))
+    }
   }
   
   if (missing(mu)){
@@ -116,44 +153,235 @@ panelVAR <- function(
   if (!missing(mu) && (is.na(dim(mu)[2])) || (ncol(mu) == 1)){
     mu <- matrix(mu,nNode,nGroup)
   }
-
-  ### Obtain the model ###
-  GroupModels <- lapply(seq_len(nGroup),function(i){
-    Model <- panelVAR_modelGen_stat(data[data[[groupVar]] == allGroups[i],], 
-                                    nNode = nNode, nTime = nTime, nodeLabels = nodeLabels,allLabels = allLabels,
-                                    designMatrix = designMatrix,
-                                    kappa_mu = kappa_mu,
-                                    sigma_mu = sigma_mu,
-                                    kappa_zeta = kappa_zeta,
-                                    sigma_zeta = sigma_zeta,
-                                    mu = mu,
-                                    beta = beta,
-                                    startValues = list(),
-                                    name = allGroups[i],
-                                    group = i)
-  })
   
+  # Estimate saturated model:
+  ### This is taking too long... So I'll just use lavaan instead for this.
+    # if (missing(saturatedModel)){
+  #   GroupModels <- lapply(seq_len(nGroup),function(i){
+  #     panelVAR_modelGen_saturated(data[data[[groupVar]] == allGroups[i],], 
+  #      nNode = nNode, nTime = nTime, 
+  #      designMatrix = designMatrix,
+  #      name = paste0(allGroups[i],"_saturated"),
+  #     group = i)
+  #   })
+  #   allArgs <- c(
+  #     list(name = name,mxFitFunctionMultigroup(paste0(allGroups,"_saturated"))),
+  #     GroupModels
+  #   )
+  #   FullModel <- do.call(mxModel,allArgs)
+  #   
+  #     
+  #     if (verbose){
+  #       message("Estimating saturated model...")
+  #     }
+  #   # Run model:
+  #   saturatedModel <- mxRun(FullModel, silent = TRUE)
+  # }
   
-  # Combine group models:
-  allArgs <- c(
-    list(name = name,mxFitFunctionMultigroup(allGroups)),
-    GroupModels
-  )
-  FullModel <- do.call(mxModel,allArgs)
-  
-  # Run model:
-  Fit <- mxRun(FullModel)
-  
-  # Compute MIs:
-  if (modIndices){
-    miRes <- mxMI(Fit$g1, matrices = searchMatrices)
+  # Estimate baseline model:
+  # baseline model is simply a normal model with beta = 0 and sigma_zeta and sigma_mu diagonal.
+  # equality constraints ARE included in this model. 
+  if (verbose){
+    message("Estimating saturated model...")
   }
+  lavRes <- lavCor(data[,c(na.omit(c(designMatrix)), groupVar)], missing = missing, output = "fit", group = groupVar)
+  sat_covs <- lavInspect(lavRes,"Sigma")
+  for (i in 1:nGroup){
+    class(sat_covs[[i]]) <- "matrix"
+  }
+  sat_means <- lavInspect(lavRes,"Mu") 
+  nObs <- lavInspect(lavRes, "nObs")
   
-  # Model selection
-  if (stepup){
+  
+  if (missing(baselineModel)){
+    GroupModels <- lapply(seq_len(nGroup),function(i){
+      panelVAR_modelGen_stat(covMat = sat_covs[[i]],means = sat_means[[i]],sampleSize = nObs[i],
+                             nNode = nNode, nTime = nTime, 
+                             designMatrix = designMatrix,
+                             sigma_mu = array(diag(NA,nNode),dim = c(nNode,nNode,nGroup)),
+                             sigma_zeta = array(diag(NA,nNode),dim = c(nNode,nNode,nGroup)),
+                             mu = matrix(NA,nNode,nGroup),
+                             beta = array(0, dim=c(nNode, nNode,nGroup)),
+                             startValues = list(),
+                             name = paste0(allGroups[i],"_baseline"),
+                             groupEqual = groupEqual,
+                             group = i)
+    })
+    allArgs <- c(
+      list(name = name,mxFitFunctionMultigroup(paste0(allGroups,"_baseline"))),
+      GroupModels
+    )
+    FullModel <- do.call(mxModel,allArgs)
     
+    
+    if (verbose){
+      message("Estimating baseline model...")
+    }
+    # Run model:
+    baselineModel <- mxRun(FullModel, silent = TRUE)
   }
-  browser()
   
-  return(Fit)
+
+  
+  # Start of main loop (simply breaks if stepup = FALSE)
+  run <- 1
+  repeat{
+    ### Obtain the model ###
+    GroupModels <- lapply(seq_len(nGroup),function(i){
+      panelVAR_modelGen_stat(covMat = sat_covs[[i]],means = sat_means[[i]],sampleSize = nObs[i],
+                                      nNode = nNode, nTime = nTime, 
+                                      designMatrix = designMatrix,
+                                      kappa_mu = kappa_mu,
+                                      sigma_mu = sigma_mu,
+                                      kappa_zeta = kappa_zeta,
+                                      sigma_zeta = sigma_zeta,
+                                      mu = mu,
+                                      beta = beta,
+                                      startValues = list(),
+                                      name = allGroups[i],
+                                      groupEqual = groupEqual,
+                                      group = i)
+    })
+    
+    if (verbose){
+      if (stepup){
+        if (run == 1){
+          message("Estimating starting model...")          
+        } else {
+          message("Estimating new model...")
+        }
+        
+      } else {
+        message("Estimating model...")
+      }
+    }
+    # Combine group models:
+    allArgs <- c(
+      list(name = name,mxFitFunctionMultigroup(allGroups)),
+      GroupModels
+    )
+    FullModel <- do.call(mxModel,allArgs)
+    
+    # Run model:
+    Fit <- mxRun(FullModel, silent = TRUE)
+    
+    # Check for BIC:
+    if (optimizeBIC && run > 1){
+      if (summary(Fit)$BIC.Mx > summary(oldFit)$BIC.Mx){
+        if (verbose){
+          message("New model did not improve BIC, returning previous model.")
+          Fit <- oldFit
+          break
+        }
+      }
+    }
+    
+    # Compute MIs:
+    if (modIndices){
+      if (verbose){
+        message("Computing modification indices...")
+      }
+      suppressMessages(miRes <- lapply(allGroups, function(g) mxMI(Fit[[g]], matrices = searchMatrices)))
+      
+      # Make list of MIs:
+      miList <- lapply(miRes,"[[","MI")
+      
+ 
+    }
+    
+    # Stepup search:
+    if (!stepup){
+      break
+    } else {
+      
+      # If any MI not significant, break:
+      if (!any(unlist(miList) > qchisq(alpha,1,lower.tail = FALSE))){
+        if (verbose){
+          message("No parameter can be added at given alpha level")
+        }
+        break
+      }
+      
+      miPars <-  lapply(miRes,function(x)names(x$MI))
+      
+      
+      # Modify models:
+      for (g in 1:nGroup){
+        if (jointStructure){
+          # Compute mean per MI (needed if jointStructure = TRUE):
+          meanMIs <- rowMeans(do.call(cbind,miList))
+          
+          optimalMI <- miPars[[g]][which.max(meanMIs)]
+        } else {
+          # Test if any improves fit:
+          if (!any(miList[[g]] > qchisq(alpha,1,lower.tail = FALSE))){
+            next
+          }
+          # Optimal parameter to add:
+          optimalMI <- miPars[[g]][which.max(miList[[g]])]
+        }
+        
+        # Name of matrix:
+        matName <- gsub("\\_\\d*\\_\\d*\\_\\d*","",optimalMI)
+        
+        # Indices:
+        inds <- as.numeric(unlist(regmatches(optimalMI,gregexpr("\\d+",optimalMI))))
+        eval(parse(text=paste0(matName,"[",inds[1],",",inds[2],",",g,"] <- NA")))
+        # Symmetric?
+        if (grepl("(kappa)|(sigma)",optimalMI)){
+          # Replace first two digits:
+          eval(parse(text=paste0(matName,"[",inds[2],",",inds[1],",",g,"] <- NA")))
+        }
+      }
+    }
+    
+    run <- run + 1
+    oldFit <- Fit
+  }
+  
+  
+  ### Compute fit indices  as per Lavaan ###
+  # Saturated means:
+  # sat_means <- lapply(allGroups,function(g)saturatedModel[[paste0(g,"_saturated")]][['mu']][['values']])
+  
+  # Saturated Covs:
+  # sat_covs <- lapply(allGroups,function(g)saturatedModel[[paste0(g,"_saturated")]][['Sigma']][['values']])
+  
+  # Model means:
+  model_means <- lapply(allGroups,function(g)Fit[[g]][['MuFull']]$result)
+  
+  # Model covs:
+  model_covs <- lapply(allGroups,function(g)Fit[[g]][['Sigma']]$result)
+  
+  # Baseline means:
+  bas_means <- lapply(allGroups,function(g)baselineModel[[paste0(g,"_baseline")]][['MuFull']]$result)
+  
+  # Baseline Covs:
+  bas_covs <- lapply(allGroups,function(g)baselineModel[[paste0(g,"_baseline")]][['Sigma']]$result)
+  
+  # Descriptives:
+  nPar <- summary(Fit)[['estimatedParameters']]
+  nSample <- summary(Fit)$numObs
+  
+  FitInds <- mxNetworkFit(
+    model_means = model_means,
+    model_covs = model_covs,
+    sat_means = sat_means,
+    sat_covs = sat_covs,
+    bas_means = bas_means,
+    bas_covs = bas_covs,
+    nPar = nPar, # Number of parameters (total)
+    bas_nPar = summary(baselineModel)[['estimatedParameters']],
+    sampleSize = nSample, # Total sample size
+    verbose = verbose,
+    nGroup=nGroup
+  )
+  
+  Res <- list(
+    modelFit = Fit,
+    # saturated = saturatedModel,
+    baseline = baselineModel,
+    fitMeasures = FitInds
+  )
+  return(Res)
 }

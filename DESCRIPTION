@@ -6,4 +6,4 @@ Author: Sacha Epskamp
 Maintainer: Sacha Epskamp <mail@sachaepskamp.com>
 Description: ...
 License: GPL-2
-Imports: qgraph (>= 1.6), dplyr
+Imports: qgraph (>= 1.6), dplyr, corpcor

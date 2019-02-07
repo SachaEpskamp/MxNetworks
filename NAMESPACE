@@ -1,2 +1,4 @@
 import(qgraph)
 import(dplyr)
+importFrom(corpcor,pseudoinverse)
+importFrom(lavaan,lavCor)

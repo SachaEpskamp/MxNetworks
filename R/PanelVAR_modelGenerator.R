@@ -1,11 +1,12 @@
 # Generate stationary PanelVAR model (internally):
 panelVAR_modelGen_stat <- function(
-  data, # Data
+  # data, # Data
+  covMat,
+  means,
+  sampleSize,
   designMatrix,
   nNode,
   nTime,
-  nodeLabels,
-  allLabels,
   kappa_mu,
   sigma_mu,
   kappa_zeta,
@@ -14,6 +15,7 @@ panelVAR_modelGen_stat <- function(
   mu,
   startValues = list(),
   name = "PanelVAR",
+  groupEqual = "none",
   group = 1
 ){
   # Some defaults:
@@ -52,7 +54,7 @@ panelVAR_modelGen_stat <- function(
     rownames(designMatrix) <- paste0("V",seq_len(nNode))
   }
   if (is.null(colnames(designMatrix))){
-    rownames(designMatrix) <- paste0("t",seq_len(nTime))
+    colnames(designMatrix) <- paste0("t",seq_len(nTime))
   }
   
   # Obtain labels:
@@ -81,34 +83,53 @@ panelVAR_modelGen_stat <- function(
                        name = "F")
   
   ## Temporal effects:
+
+  if ("temporal" %in% groupEqual){
+    labs <- toLabel(beta[,,group],"beta",group=0)
+  } else {
+    labs <- toLabel(beta[,,group],"beta",group=group)
+  }
+  
   MxBeta <- mxMatrix("Full",
                      nrow=nNode,
                      ncol=nNode,
                      free = isFree(beta[,,group]),
-                     labels = toLabel(beta[,,group],"beta",group=group),
+                     labels = labs,
                      values = start("beta",startValues,ifelse(isFree(beta[,,group]),0,toFree(beta[,,group]))),
                      name = "Beta")
   
   ## Contemporaneous effects:
   # Model via kappa_zeta:
   if (!missing(kappa_zeta)){
+    if ("contemporaneous" %in% groupEqual){
+      labs <- toLabel(kappa_zeta[,,group],"kappa_zeta",symmetric = TRUE,group=0)
+    } else {
+      labs <- toLabel(kappa_zeta[,,group],"kappa_zeta",symmetric = TRUE,group=group)
+    }
+    
     MxKappa_zeta <-  mxMatrix("Symm",
                               nrow=nNode,
                               ncol=nNode,
                               free = isFree(kappa_zeta[,,group]),
-                              labels = toLabel(kappa_zeta[,,group],"kappa_zeta",symmetric = TRUE,group=group),
+                              labels = labs,
                               values = start("kappa_zeta",startValues,ifelse(isFree(kappa_zeta[,,group]),diag(nNode),toFree(kappa_zeta[,,group]))),
                               name = "Kappa_zeta")
     
     
     MxSigma_zeta <-  mxAlgebraFromString("solve(Kappa_zeta)",name = "Sigma_zeta")
   } else {
+    if ("contemporaneous" %in% groupEqual){
+      labs <- toLabel(sigma_zeta[,,group],"sigma_zeta",symmetric = TRUE,group=0)
+    } else {
+      labs <- toLabel(sigma_zeta[,,group],"sigma_zeta",symmetric = TRUE,group=group)
+    }
+    
     # Model via sigma_zeta
     MxSigma_zeta <-  mxMatrix("Symm",
                               nrow=nNode,
                               ncol=nNode,
                               free = isFree(sigma_zeta[,,group]),
-                              labels = toLabel(sigma_zeta[,,group],"sigma_zeta",symmetric = TRUE,group=group),
+                              labels = labs,
                               values = start("sigma_zeta",startValues,ifelse(isFree(sigma_zeta[,,group]),diag(nNode),toFree(sigma_zeta[,,group]))),
                               name = "Sigma_zeta")
     
@@ -119,24 +140,35 @@ panelVAR_modelGen_stat <- function(
   ## Between-subject effects:
   # Model via kappa_zeta:
   if (!missing(kappa_mu)){
+    if ("betweenSubjects" %in% groupEqual){
+      labs <- toLabel(kappa_mu[,,group],"kappa_mu",symmetric = TRUE,group=0)
+    } else {
+      labs <- toLabel(kappa_mu[,,group],"kappa_mu",symmetric = TRUE,group=group)
+    }
     MxKappa_mu <-  mxMatrix("Symm",
                               nrow=nNode,
                               ncol=nNode,
                               free = isFree(kappa_mu[,,group]),
-                              labels = toLabel(kappa_mu[,,group],"kappa_mu",symmetric = TRUE,group=group),
+                              labels = labs,
                               values = start("kappa_mu",startValues,ifelse(isFree(kappa_mu[,,group]),diag(nNode),toFree(kappa_mu[,,group]))),
                               name = "Kappa_mu")
     
     
     MxSigma_mu <-  mxAlgebraFromString("solve(Kappa_mu)",name = "Sigma_mu")
   } else {
+    if ("betweenSubjects" %in% groupEqual){
+      labs <- toLabel(sigma_mu[,,group],"sigma_mu",symmetric = TRUE,group=0)
+    } else {
+      labs <- toLabel(sigma_mu[,,group],"sigma_mu",symmetric = TRUE,group=group)
+    }
+    
     # Model via sigma_mu
     MxSigma_mu <-  mxMatrix("Symm",
                               nrow=nNode,
                               ncol=nNode,
-                              free = isFree(sigma_mu),
-                              labels = toLabel(sigma_mu,"sigma_mu",symmetric = TRUE,group=group),
-                              values = start("sigma_mu",startValues,ifelse(isFree(sigma_mu),diag(nNode),toFree(sigma_mu))),
+                              free = isFree(sigma_mu[,,group]),
+                              labels = labs,
+                              values = start("sigma_mu",startValues,ifelse(isFree(sigma_mu[,,group]),diag(nNode),toFree(sigma_mu[,,group]))),
                               name = "Sigma_mu")
     
     
@@ -209,8 +241,8 @@ panelVAR_modelGen_stat <- function(
   # Fit function:
   fitFunction <- OpenMx::mxFitFunctionML()
   
-  # Data:
-  openMxData <- OpenMx::mxData(data, type = "raw")
+  # Data: covMat,
+  openMxData <- OpenMx::mxData(covMat, type = "cov",means=matrix(means),numObs=sampleSize)
   
   # Combine model:
   allArgs <- list(name = name,
