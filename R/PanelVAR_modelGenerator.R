@@ -106,7 +106,7 @@ panelVAR_modelGen_stat <- function(
     } else {
       labs <- toLabel(kappa_zeta[,,group],"kappa_zeta",symmetric = TRUE,group=group)
     }
-    
+
     MxKappa_zeta <-  mxMatrix("Symm",
                               nrow=nNode,
                               ncol=nNode,
@@ -123,7 +123,7 @@ panelVAR_modelGen_stat <- function(
     } else {
       labs <- toLabel(sigma_zeta[,,group],"sigma_zeta",symmetric = TRUE,group=group)
     }
-    
+
     # Model via sigma_zeta
     MxSigma_zeta <-  mxMatrix("Symm",
                               nrow=nNode,
@@ -242,7 +242,7 @@ panelVAR_modelGen_stat <- function(
   fitFunction <- OpenMx::mxFitFunctionML()
   
   # Data: covMat,
-  openMxData <- OpenMx::mxData(covMat, type = "cov",means=matrix(means),numObs=sampleSize)
+  openMxData <- OpenMx::mxData(covMat, type = "cov",means=means,numObs=sampleSize)
   
   # Combine model:
   allArgs <- list(name = name,

@@ -25,11 +25,20 @@ panelVAR <- function(
   searchMatrices = c("Beta","Kappa_mu","Kappa_zeta"),
   alpha = 0.01, # alpha used for modification
   verbose = TRUE,
-  optimizeBIC = TRUE, # If TRUE, stepup search stops when BIC is not improved
   # saturatedModel,
   baselineModel,
   missing = "fiml"
 ){
+  optimizeBIC = FALSE # If TRUE, stepup search stops when BIC is not improved
+  # Set now to FALSE for dummy
+  
+  # obtain from designMatrix:
+  if (missing(designMatrix)){
+    stop("'designMatrix' argument may not be missing. See ?panelVAR for more details.")
+  }
+  nNode <- nrow(designMatrix)
+  nTime <- ncol(designMatrix)
+  
   if (stepup & !modIndices){
     modIndices <- TRUE
   }
@@ -186,10 +195,12 @@ panelVAR <- function(
   }
   lavRes <- lavCor(data[,c(na.omit(c(designMatrix)), groupVar)], missing = missing, output = "fit", group = groupVar)
   sat_covs <- lavInspect(lavRes,"Sigma")
+  sat_means <- lavInspect(lavRes,"Mu") 
   for (i in 1:nGroup){
     class(sat_covs[[i]]) <- "matrix"
+    sat_means[[i]] <- as.vector(sat_means[[i]])
+    names(sat_means[[i]]) <- colnames(sat_covs[[i]])
   }
-  sat_means <- lavInspect(lavRes,"Mu") 
   nObs <- lavInspect(lavRes, "nObs")
   
   
