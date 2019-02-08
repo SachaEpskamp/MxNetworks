@@ -228,10 +228,15 @@ panelVAR_modelGen_stat <- function(
     
   }
 
+  if ("means" %in% groupEqual){
+    labs <- toLabel(mu[,group,drop=FALSE],"mu",symmetric = TRUE,group=0)
+  } else {
+    labs <- toLabel(mu[,group,drop=FALSE],"mu",symmetric = TRUE,group=group)
+  }
   ## Mean structure:
   MxMu <- mxMatrix("Full",ncol=1,nrow=nNode,
                    free = isFree(mu[,group,drop=FALSE]),
-                   labels = toLabel(mu[,group,drop=FALSE],"mu",symmetric = TRUE,group=group),
+                   labels = labs,
                    values = start("mu",startValues,ifelse(isFree(mu[,group,drop=FALSE]),diag(nNode),toFree(mu[,group,drop=FALSE]))),
                    name="mu")
   
