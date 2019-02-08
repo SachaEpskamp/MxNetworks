@@ -13,6 +13,9 @@ panelVAR_modelGen_stat <- function(
   sigma_zeta,
   beta,
   mu,
+  temporal = TRUE,
+  contemporaneous = TRUE,
+  betweenSubjects = TRUE,
   startValues = list(),
   name = "PanelVAR",
   groupEqual = "none",
@@ -90,91 +93,141 @@ panelVAR_modelGen_stat <- function(
     labs <- toLabel(beta[,,group],"beta",group=group)
   }
   
-  MxBeta <- mxMatrix("Full",
-                     nrow=nNode,
-                     ncol=nNode,
-                     free = isFree(beta[,,group]),
-                     labels = labs,
-                     values = start("beta",startValues,ifelse(isFree(beta[,,group]),0,toFree(beta[,,group]))),
-                     name = "Beta")
+  if (temporal){
+    MxBeta <- mxMatrix("Full",
+                       nrow=nNode,
+                       ncol=nNode,
+                       free = isFree(beta[,,group]),
+                       labels = labs,
+                       values = start("beta",startValues,ifelse(isFree(beta[,,group]),0,toFree(beta[,,group]))),
+                       name = "Beta")
+  } else {
+    MxBeta <- mxMatrix("Full",
+                       nrow=nNode,
+                       ncol=nNode,
+                       free = FALSE,
+                       labels = labs,
+                       values = 0,
+                       name = "Beta")
+  }
+
   
   ## Contemporaneous effects:
   # Model via kappa_zeta:
-  if (!missing(kappa_zeta)){
-    if ("contemporaneous" %in% groupEqual){
-      labs <- toLabel(kappa_zeta[,,group],"kappa_zeta",symmetric = TRUE,group=0)
-    } else {
-      labs <- toLabel(kappa_zeta[,,group],"kappa_zeta",symmetric = TRUE,group=group)
-    }
-
+  if (!contemporaneous){
     MxKappa_zeta <-  mxMatrix("Symm",
                               nrow=nNode,
                               ncol=nNode,
-                              free = isFree(kappa_zeta[,,group]),
-                              labels = labs,
-                              values = start("kappa_zeta",startValues,ifelse(isFree(kappa_zeta[,,group]),diag(nNode),toFree(kappa_zeta[,,group]))),
+                              free = FALSE,
+                              values = 0,
                               name = "Kappa_zeta")
     
     
-    MxSigma_zeta <-  mxAlgebraFromString("solve(Kappa_zeta)",name = "Sigma_zeta")
-  } else {
-    if ("contemporaneous" %in% groupEqual){
-      labs <- toLabel(sigma_zeta[,,group],"sigma_zeta",symmetric = TRUE,group=0)
-    } else {
-      labs <- toLabel(sigma_zeta[,,group],"sigma_zeta",symmetric = TRUE,group=group)
-    }
-
-    # Model via sigma_zeta
     MxSigma_zeta <-  mxMatrix("Symm",
                               nrow=nNode,
                               ncol=nNode,
-                              free = isFree(sigma_zeta[,,group]),
-                              labels = labs,
-                              values = start("sigma_zeta",startValues,ifelse(isFree(sigma_zeta[,,group]),diag(nNode),toFree(sigma_zeta[,,group]))),
-                              name = "Sigma_zeta")
+                              free = FALSE,
+                              values = 0,
+                              name = "Sigma_zeta")  
     
-    
-    MxKappa_zeta <-  mxAlgebraFromString("solve(Sigma_zeta)",name = "Kappa_zeta")
+  } else {
+    if (!missing(kappa_zeta)){
+      if ("contemporaneous" %in% groupEqual){
+        labs <- toLabel(kappa_zeta[,,group],"kappa_zeta",symmetric = TRUE,group=0)
+      } else {
+        labs <- toLabel(kappa_zeta[,,group],"kappa_zeta",symmetric = TRUE,group=group)
+      }
+      
+      MxKappa_zeta <-  mxMatrix("Symm",
+                                nrow=nNode,
+                                ncol=nNode,
+                                free = isFree(kappa_zeta[,,group]),
+                                labels = labs,
+                                values = start("kappa_zeta",startValues,ifelse(isFree(kappa_zeta[,,group]),diag(nNode),toFree(kappa_zeta[,,group]))),
+                                name = "Kappa_zeta")
+      
+      
+      MxSigma_zeta <-  mxAlgebraFromString("solve(Kappa_zeta)",name = "Sigma_zeta")
+    } else {
+      if ("contemporaneous" %in% groupEqual){
+        labs <- toLabel(sigma_zeta[,,group],"sigma_zeta",symmetric = TRUE,group=0)
+      } else {
+        labs <- toLabel(sigma_zeta[,,group],"sigma_zeta",symmetric = TRUE,group=group)
+      }
+      
+      # Model via sigma_zeta
+      MxSigma_zeta <-  mxMatrix("Symm",
+                                nrow=nNode,
+                                ncol=nNode,
+                                free = isFree(sigma_zeta[,,group]),
+                                labels = labs,
+                                values = start("sigma_zeta",startValues,ifelse(isFree(sigma_zeta[,,group]),diag(nNode),toFree(sigma_zeta[,,group]))),
+                                name = "Sigma_zeta")
+      
+      
+      MxKappa_zeta <-  mxAlgebraFromString("solve(Sigma_zeta)",name = "Kappa_zeta")
+    }
   }
 
+
   ## Between-subject effects:
-  # Model via kappa_zeta:
-  if (!missing(kappa_mu)){
-    if ("betweenSubjects" %in% groupEqual){
-      labs <- toLabel(kappa_mu[,,group],"kappa_mu",symmetric = TRUE,group=0)
-    } else {
-      labs <- toLabel(kappa_mu[,,group],"kappa_mu",symmetric = TRUE,group=group)
-    }
+  if (!betweenSubjects){
     MxKappa_mu <-  mxMatrix("Symm",
+                            nrow=nNode,
+                            ncol=nNode,
+                            free = FALSE,
+                            values = 0,
+                            name = "Kappa_mu")    
+    
+    MxSigma_mu <-  mxMatrix("Symm",
+                            nrow=nNode,
+                            ncol=nNode,
+                            free = FALSE,
+                            values = 0,
+                            name = "Sigma_mu")    
+    
+  } else {
+    
+    # Model via kappa_zeta:
+    if (!missing(kappa_mu)){
+      if ("betweenSubjects" %in% groupEqual){
+        labs <- toLabel(kappa_mu[,,group],"kappa_mu",symmetric = TRUE,group=0)
+      } else {
+        labs <- toLabel(kappa_mu[,,group],"kappa_mu",symmetric = TRUE,group=group)
+      }
+      
+      MxKappa_mu <-  mxMatrix("Symm",
                               nrow=nNode,
                               ncol=nNode,
                               free = isFree(kappa_mu[,,group]),
                               labels = labs,
                               values = start("kappa_mu",startValues,ifelse(isFree(kappa_mu[,,group]),diag(nNode),toFree(kappa_mu[,,group]))),
                               name = "Kappa_mu")
-    
-    
-    MxSigma_mu <-  mxAlgebraFromString("solve(Kappa_mu)",name = "Sigma_mu")
-  } else {
-    if ("betweenSubjects" %in% groupEqual){
-      labs <- toLabel(sigma_mu[,,group],"sigma_mu",symmetric = TRUE,group=0)
+      
+      
+      MxSigma_mu <-  mxAlgebraFromString("solve(Kappa_mu)",name = "Sigma_mu")
     } else {
-      labs <- toLabel(sigma_mu[,,group],"sigma_mu",symmetric = TRUE,group=group)
-    }
-    
-    # Model via sigma_mu
-    MxSigma_mu <-  mxMatrix("Symm",
+      if ("betweenSubjects" %in% groupEqual){
+        labs <- toLabel(sigma_mu[,,group],"sigma_mu",symmetric = TRUE,group=0)
+      } else {
+        labs <- toLabel(sigma_mu[,,group],"sigma_mu",symmetric = TRUE,group=group)
+      }
+      
+      # Model via sigma_mu
+      MxSigma_mu <-  mxMatrix("Symm",
                               nrow=nNode,
                               ncol=nNode,
                               free = isFree(sigma_mu[,,group]),
                               labels = labs,
                               values = start("sigma_mu",startValues,ifelse(isFree(sigma_mu[,,group]),diag(nNode),toFree(sigma_mu[,,group]))),
                               name = "Sigma_mu")
+      
+      
+      MxKappa_mu <-  mxAlgebraFromString("solve(Sigma_mu)",name = "Kappa_mu")
+    }
     
-    
-    MxKappa_mu <-  mxAlgebraFromString("solve(Sigma_mu)",name = "Kappa_mu")
   }
-  
+
   ## Mean structure:
   MxMu <- mxMatrix("Full",ncol=1,nrow=nNode,
                    free = isFree(mu[,group,drop=FALSE]),

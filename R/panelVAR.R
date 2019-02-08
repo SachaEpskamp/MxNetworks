@@ -5,20 +5,24 @@ panelVAR <- function(
   groupVar, # Grouping variable, if missing it is added
   # fixedSaturated = FALSE, # Just sets saturated model means and covs to fixed from sample covs (pairwise deletion). Not optimal... But fast!
   stepup = FALSE, # Should step-up model selection be used?
+  speedStart = FALSE,
   jointStructure = FALSE, # Should the same structure (but not nessisarily parameters) be estimated?
   groupEqual = "none", # options: "networks", "means", "all", "temporal", "contemporaneous", "between-subjects"
   MIcrit = 10, # Mod index criterion
-  temporalModel = c("default","full","empty","manual"), # Models to use: default will pick, full = saturated, empty = empty, manual to take input form args below
+  temporalModel = c("default","diag","full","empty","manual"), # Models to use: default will pick, full = saturated, empty = empty, manual to take input form args below
   contemporaneousModel = c("default","full","empty","manual"),
-  contemporaneousPartial = TRUE, # Default to estimating GGM instead of cov matrix?
+  contemporaneousPartial, # Default to estimating GGM instead of cov matrix?
   betweenSubjectsModel = c("default","full","empty","manual"),
-  betweenSubjectsPartial = TRUE, # Default to estimating GGM instead of cov matrix?
+  betweenSubjectsPartial, # Default to estimating GGM instead of cov matrix?
   kappa_mu,
   sigma_mu,
   kappa_zeta,
   sigma_zeta,
   beta,
   mu,
+  temporal = TRUE,
+  contemporaneous = TRUE,
+  betweenSubjects = TRUE,
   modIndices = stepup, # Set to FALSE if stepup = FALSE
   startValues = list(),
   name = "PanelVAR",
@@ -27,9 +31,10 @@ panelVAR <- function(
   verbose = TRUE,
   # saturatedModel,
   baselineModel,
-  missing = "fiml"
+  missing = "fiml",
+  optimizeBIC = TRUE
 ){
-  optimizeBIC = FALSE # If TRUE, stepup search stops when BIC is not improved
+  # optimizeBIC = FALSE # If TRUE, stepup search stops when BIC is not improved
   # Set now to FALSE for dummy
   
   # obtain from designMatrix:
@@ -41,6 +46,31 @@ panelVAR <- function(
   
   if (stepup & !modIndices){
     modIndices <- TRUE
+  }
+  
+  # Defaults:
+  if (missing(contemporaneousPartial)){
+    if (missing(kappa_zeta) && missing(sigma_zeta)){
+      contemporaneousPartial <- TRUE
+    } else if (!missing(kappa_zeta) && missing(sigma_zeta)){
+      contemporaneousPartial <- TRUE
+    } else if (missing(kappa_zeta) && !missing(sigma_zeta)){
+      contemporaneousPartial <- FALSE
+    } else {
+      stop("'kappa_zeta' and 'sigma_zeta' cannot both be missing.")
+    }
+  }
+  
+  if (missing(betweenSubjectsPartial)){
+    if (missing(kappa_mu) && missing(sigma_mu)){
+      betweenSubjectsPartial <- TRUE
+    } else if (!missing(kappa_mu) && missing(sigma_mu)){
+      betweenSubjectsPartial <- TRUE
+    } else if (missing(kappa_mu) && !missing(sigma_mu)){
+      betweenSubjectsPartial <- FALSE
+    } else {
+      stop("'kappa_mu' and 'sigma_mu' cannot both be missing.")
+    }
   }
   
   ### Check input ###
@@ -109,6 +139,8 @@ panelVAR <- function(
     beta <- array(0, c(nNode, nNode,nGroup))
   } else if (temporalModel == "full"){
     beta <- array(NA, c(nNode, nNode,nGroup))
+  } else  if(temporalModel == "diag"){
+    beta <- array(diag(NA,nNode), c(nNode, nNode,nGroup))
   }
   
   if (contemporaneousPartial){
@@ -216,7 +248,10 @@ panelVAR <- function(
                              startValues = list(),
                              name = paste0(allGroups[i],"_baseline"),
                              groupEqual = groupEqual,
-                             group = i)
+                             group = i,
+                             temporal = FALSE,
+                             contemporaneous = TRUE,
+                             betweenSubjects = FALSE)
     })
     allArgs <- c(
       list(name = name,mxFitFunctionMultigroup(paste0(allGroups,"_baseline"))),
@@ -251,7 +286,10 @@ panelVAR <- function(
                                       startValues = list(),
                                       name = allGroups[i],
                                       groupEqual = groupEqual,
-                                      group = i)
+                                      group = i,
+                                       temporal = temporal,
+                                       contemporaneous = contemporaneous,
+                                       betweenSubjects = betweenSubjects)
     })
     
     if (verbose){
@@ -276,12 +314,56 @@ panelVAR <- function(
     # Run model:
     Fit <- mxRun(FullModel, silent = TRUE)
     
+    
+    # Fit inds:
+    
+    # Model means:
+    model_means <- lapply(allGroups,function(g)Fit[[g]][['MuFull']]$result)
+    
+    # Model covs:
+    model_covs <- lapply(allGroups,function(g)Fit[[g]][['Sigma']]$result)
+    
+    # Baseline means:
+    bas_means <- lapply(allGroups,function(g)baselineModel[[paste0(g,"_baseline")]][['MuFull']]$result)
+    
+    # Baseline Covs:
+    bas_covs <- lapply(allGroups,function(g)baselineModel[[paste0(g,"_baseline")]][['Sigma']]$result)
+    
+    # Descriptives:
+    nPar <- summary(Fit)[['estimatedParameters']]
+    nSample <- summary(Fit)$numObs
+    
+    FitInds <- mxNetworkFit(
+      model_means = model_means,
+      model_covs = model_covs,
+      sat_means = sat_means,
+      sat_covs = sat_covs,
+      bas_means = bas_means,
+      bas_covs = bas_covs,
+      nPar = nPar, # Number of parameters (total)
+      bas_nPar = summary(baselineModel)[['estimatedParameters']],
+      sampleSize = nSample, # Total sample size
+      verbose = verbose,
+      nGroup=nGroup
+    )
+    
+    # Prune after speedstart?
+    
+    # if (speedStart && run == 2){
+    #   message("Pruning all edges no longer significant at alpha / nGroup")
+    #   
+    #   names(summary(Fit))
+    #   summary(Fit)$parameters
+    #   
+    # }
+    
     # Check for BIC:
     if (optimizeBIC && run > 1){
-      if (summary(Fit)$BIC.Mx > summary(oldFit)$BIC.Mx){
+      if (!FitInds$bic < oldFitInds$bic){
         if (verbose){
           message("New model did not improve BIC, returning previous model.")
           Fit <- oldFit
+          FitInds <- oldFitInds
           break
         }
       }
@@ -306,6 +388,13 @@ panelVAR <- function(
     } else {
       
       # If any MI not significant, break:
+      if (any(is.na(unlist(miList)))){
+        if (verbose){
+          message("NA modification index found. Stopping.")
+        }
+        break
+      }
+      
       if (!any(unlist(miList) > qchisq(alpha,1,lower.tail = FALSE))){
         if (verbose){
           message("No parameter can be added at given alpha level")
@@ -315,6 +404,9 @@ panelVAR <- function(
       
       miPars <-  lapply(miRes,function(x)names(x$MI))
       
+      if (speedStart && run == 1){
+        message("Speedstart! Adding all MIs that are significant at alpha / nTest")
+        }
       
       # Modify models:
       for (g in 1:nGroup){
@@ -322,32 +414,60 @@ panelVAR <- function(
           # Compute mean per MI (needed if jointStructure = TRUE):
           meanMIs <- rowMeans(do.call(cbind,miList))
           
-          optimalMI <- miPars[[g]][which.max(meanMIs)]
+          if (speedStart && run == 1){
+            nTests <- length(unlist(miList))
+            optimalMIs <- miPars[[g]][meanMIs > qchisq(alpha/nTests,1,lower.tail=FALSE)] 
+            if (length(optimalMIs) == 0){
+              optimalMIs <- miPars[[g]][which.max(meanMIs)]
+            }
+          } else {
+            optimalMIs <- miPars[[g]][which.max(meanMIs)]
+          }
         } else {
           # Test if any improves fit:
+          if (any(is.na(miList[[g]]))){
+            if (verbose){
+              message("NA modification index found. Stopping.")
+            }
+            break
+          }
           if (!any(miList[[g]] > qchisq(alpha,1,lower.tail = FALSE))){
             next
           }
           # Optimal parameter to add:
-          optimalMI <- miPars[[g]][which.max(miList[[g]])]
+          if (speedStart && run == 1){
+
+            nTests <- length(unlist(miList))
+            optimalMIs <- miPars[[g]][miList[[g]] > qchisq(alpha/nTests,1,lower.tail=FALSE)] 
+            if (length(optimalMIs) == 0){
+              optimalMIs <- miPars[[g]][which.max(miList[[g]])] 
+            }
+          } else {
+            optimalMIs <- miPars[[g]][which.max(miList[[g]])] 
+          }
         }
         
         # Name of matrix:
-        matName <- gsub("\\_\\d*\\_\\d*\\_\\d*","",optimalMI)
-        
-        # Indices:
-        inds <- as.numeric(unlist(regmatches(optimalMI,gregexpr("\\d+",optimalMI))))
-        eval(parse(text=paste0(matName,"[",inds[1],",",inds[2],",",g,"] <- NA")))
-        # Symmetric?
-        if (grepl("(kappa)|(sigma)",optimalMI)){
-          # Replace first two digits:
-          eval(parse(text=paste0(matName,"[",inds[2],",",inds[1],",",g,"] <- NA")))
+        for (m in seq_along(optimalMIs)){
+          optimalMI <- optimalMIs[m]
+          matName <- gsub("\\_\\d*\\_\\d*\\_\\d*","",optimalMI)
+          
+          # Indices:
+          inds <- as.numeric(unlist(regmatches(optimalMI,gregexpr("\\d+",optimalMI))))
+          eval(parse(text=paste0(matName,"[",inds[1],",",inds[2],",",g,"] <- NA")))
+          # Symmetric?
+          if (grepl("(kappa)|(sigma)",optimalMI)){
+            # Replace first two digits:
+            eval(parse(text=paste0(matName,"[",inds[2],",",inds[1],",",g,"] <- NA")))
+          }
         }
+
       }
     }
     
     run <- run + 1
     oldFit <- Fit
+    oldFitInds <- FitInds
   }
   
   
@@ -388,11 +508,73 @@ panelVAR <- function(
     nGroup=nGroup
   )
   
+
+  # Store model matrices:
+  modelMatrices <- list()
+  if (!missing(beta)){
+    modelMatrices[["beta"]] <- beta
+  }
+  if (!missing(kappa_zeta)){
+    modelMatrices[["kappa_zeta"]] <- kappa_zeta
+  }
+  if (!missing(sigma_zeta)){
+    modelMatrices[["sigma_zeta"]] <- sigma_zeta
+  }
+  if (!missing(kappa_mu)){
+    modelMatrices[["kappa_mu"]] <- kappa_mu
+  }
+  if (!missing(sigma_mu)){
+    modelMatrices[["sigma_mu"]] <- sigma_mu
+  }
+  
+  # Store networks:
+  # results <- list()
+  PDC <- array(NA,c(nNode,nNode,nGroup)) # Partial directed correlations
+  # DC  <- array(NA,c(nNode,nNode,nGroup)) # Directed correlations
+  PCC <- array(NA,c(nNode,nNode,nGroup)) # partial contemporaneous correlations
+  CC <-  array(NA,c(nNode,nNode,nGroup)) # Contemporaneous correlations
+  PBC <- array(NA,c(nNode,nNode,nGroup)) # Partial between-subjects correlations
+  BC <-  array(NA,c(nNode,nNode,nGroup)) # Between subjects correlations
+  
+  for (i in 1:nGroup){
+    B <- Fit[[allGroups[i]]]$Beta$values
+    if (contemporaneousPartial){
+      Kz <- Fit[[allGroups[i]]]$Kappa_zeta$values
+      Sz <- Fit[[allGroups[i]]]$Sigma_zeta$result
+    } else {
+      Kz <-Fit[[allGroups[i]]]$Kappa_zeta$results
+      Sz <- Fit[[allGroups[i]]]$Sigma_zeta$values
+    }
+    if (betweenSubjectsPartial){
+      Km <- Fit[[allGroups[i]]]$Kappa_mu$values
+      Sm <- Fit[[allGroups[i]]]$Sigma_mu$result
+    } else {
+      Km <-Fit[[allGroups[i]]]$Kappa_mu$results
+      Sm <- Fit[[allGroups[i]]]$Sigma_mu$values
+    }
+
+    PDC[,,i] <- computePDC(B,Kz)
+    PCC[,,i] <- computePCC(Kz)
+    PBC[,,i] <- computePCC(Km)
+    CC[,,i] <- cov2cor(Sz)
+    BC[,,i] <- cov2cor(Sm)
+  }
+  
+  results <- list(
+    PDC = PDC,
+    PCC = PCC,
+    PBC = PBC,
+    CC = CC,
+    BC = BC
+  )
+  
   Res <- list(
     modelFit = Fit,
     # saturated = saturatedModel,
     baseline = baselineModel,
-    fitMeasures = FitInds
+    fitMeasures = FitInds,
+    modelMatrices = modelMatrices,
+    results = results
   )
   return(Res)
 }
